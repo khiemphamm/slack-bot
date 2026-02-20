@@ -1,5 +1,6 @@
 const jiraService = require('../services/jiraService');
 const slackBlocks = require('../utils/slackBlocks');
+const db = require('../database/db');
 
 /**
  * Handle the /jira slash command
@@ -60,7 +61,7 @@ async function handleJiraCommand({ command, ack, respond }) {
 /**
  * Handle transition button clicks
  */
-async function handleTransitionAction({ action, ack, respond }) {
+async function handleTransitionAction({ action, ack, respond, body }) {
   await ack();
   
   try {
@@ -84,6 +85,27 @@ async function handleTransitionAction({ action, ack, respond }) {
 
     // Fire the API call
     await jiraService.transitionIssue(issueKey, transitionId);
+
+    // Identify the user who clicked the button and comment
+    try {
+      const slackId = body.user.id;
+      const transitionName = action.text && action.text.text ? action.text.text : 'new status';
+
+      if (slackId) {
+        const userMap = await db.getUserMapping(slackId);
+        if (userMap && userMap.jira_account_id) {
+          // Pass the account ID separately so Jira Service can construct the ADF mention node
+          const textPrefix = `🔄 Status updated to "${transitionName}" from Slack by `;
+          await jiraService.addComment(issueKey, textPrefix, userMap.jira_account_id);
+        } else {
+          // Fallback: If no map, just document that Slack changed it
+          const fallbackBody = `🔄 Status updated to "${transitionName}" from Slack by user (Slack ID: ${slackId}). Use \`/jira-map\` to link your account.`;
+          await jiraService.addComment(issueKey, fallbackBody);
+        }
+      }
+    } catch (dbErr) {
+      console.error('Error logging transition identity:', dbErr);
+    }
 
     // Fetch updated data
     const issueData = await jiraService.getIssue(issueKey);
@@ -216,10 +238,59 @@ async function handleJiraProjectsCommand({ ack, respond }) {
   }
 }
 
+/**
+ * Handle the /jira-map slash command
+ * Maps a Slack ID to a Jira Account ID via email search
+ */
+async function handleJiraMapCommand({ command, ack, respond, body }) {
+  await ack();
+
+  const email = command.text.trim();
+  const slackId = body.user_id;
+
+  if (!email || !email.includes('@')) {
+    await respond({
+      response_type: 'ephemeral',
+      text: '⚠️ Please provide a valid Jira email address. Example: `/jira-map firstname.lastname@company.com`'
+    });
+    return;
+  }
+
+  try {
+    const users = await jiraService.getUserByEmail(email);
+    
+    if (users && users.length > 0) {
+      const jiraUser = users[0];
+      const accountId = jiraUser.accountId;
+      const displayName = jiraUser.displayName;
+
+      // Save to SQLite
+      await db.saveUserMapping(slackId, accountId, email);
+
+      await respond({
+        response_type: 'ephemeral',
+        text: `✅ Success! Your Slack account is now linked to the Jira account: *${displayName}* (${email}).`
+      });
+    } else {
+      await respond({
+        response_type: 'ephemeral',
+        text: `❌ Could not find a Jira account matching the email: \`${email}\`. Please check your spelling and ensure the account exists in this workspace.`
+      });
+    }
+  } catch (error) {
+    console.error('Error mapping user:', error);
+    await respond({
+      response_type: 'ephemeral',
+      text: `❌ Error connecting to Jira API while searching for your email.`
+    });
+  }
+}
+
 module.exports = {
   handleJiraCommand,
   handleTransitionAction,
   handleJiraReportCommand,
   handleJiraTeamCommand,
-  handleJiraProjectsCommand
+  handleJiraProjectsCommand,
+  handleJiraMapCommand
 };

@@ -97,10 +97,64 @@ async function getProjects() {
   }
 }
 
+/**
+ * Fetch a User's Account ID by their email
+ * @param {string} email - The email address to search for
+ */
+async function getUserByEmail(email) {
+  try {
+    const response = await jiraClient.get('/user/search', {
+      params: { query: email, maxResults: 1 }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching Jira user by email ${email}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Add a comment to an issue
+ * @param {string} issueKey - The Jira issue key
+ * @param {string} text - The comment body
+ * @param {string} [mentionAccountId] - Optional Jira Account ID to mention at the end
+ */
+async function addComment(issueKey, text, mentionAccountId = null) {
+  const paragraphContent = [{ type: 'text', text: text }];
+
+  if (mentionAccountId) {
+    paragraphContent.push({
+      type: 'mention',
+      attrs: { id: mentionAccountId }
+    });
+  }
+
+  try {
+    const response = await jiraClient.post(`/issue/${issueKey}/comment`, {
+      body: {
+        type: 'doc',
+        version: 1,
+        content: [
+          {
+            type: 'paragraph',
+            content: paragraphContent
+          }
+        ]
+      }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Error adding comment to issue ${issueKey}:`, error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   getIssue,
   getTransitions,
   transitionIssue,
   getProjectMetrics,
-  getProjects
+  getProjects,
+  getUserByEmail,
+  addComment
 };

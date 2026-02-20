@@ -23,6 +23,7 @@ app.command('/jira', jiraController.handleJiraCommand);
 app.command('/jira-report', jiraController.handleJiraReportCommand);
 app.command('/jira-team', jiraController.handleJiraTeamCommand);
 app.command('/jira-projects', jiraController.handleJiraProjectsCommand);
+app.command('/jira-map', jiraController.handleJiraMapCommand);
 
 // Register button click listener pattern (matches action_id starting with 'transition_')
 app.action(/^transition_/, jiraController.handleTransitionAction);
