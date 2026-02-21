@@ -3,9 +3,10 @@
  * @param {Object} issue - Data response from Jira API
  * @param {string} issueKey - Jira issue key (e.g. PROJ-123)
  * @param {Array} transitions - Available transitions
+ * @param {Array} assignableUsers - List of users that can be assigned to this issue
  * @returns {Array} Slack Block Kit blocks array
  */
-function buildIssueMessageBlocks(issue, issueKey, transitions = []) {
+function buildIssueMessageBlocks(issue, issueKey, transitions = [], assignableUsers = []) {
   const rawDomain = process.env.JIRA_DOMAIN || 'your-domain.atlassian.net';
   const JIRA_DOMAIN = rawDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
   
@@ -66,10 +67,60 @@ function buildIssueMessageBlocks(issue, issueKey, transitions = []) {
           },
           url: issueLink,
           action_id: 'view_jira_issue'
+        },
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: '💬 Add Comment',
+            emoji: true
+          },
+          value: issueKey,
+          action_id: 'open_comment_modal'
         }
       ]
     }
   ];
+
+  // Add Assignee Dropdown if users are provided
+  if (assignableUsers && assignableUsers.length > 0) {
+    const userOptions = assignableUsers.slice(0, 99).map(u => ({
+      text: {
+        type: 'plain_text',
+        text: u.displayName,
+        emoji: true
+      },
+      value: JSON.stringify({ issueKey, accountId: u.accountId })
+    }));
+
+    // Add an "Unassigned" option at the top
+    userOptions.unshift({
+      text: {
+        type: 'plain_text',
+        text: '👤 Unassigned',
+        emoji: true
+      },
+      value: JSON.stringify({ issueKey, accountId: null })
+    });
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: '🔄 *Re-assign Issue:*'
+      },
+      accessory: {
+        type: 'static_select',
+        placeholder: {
+          type: 'plain_text',
+          text: 'Select User...',
+          emoji: true
+        },
+        options: userOptions,
+        action_id: 'assign_issue'
+      }
+    });
+  }
 
   // Add Transition Buttons if available
   if (transitions && transitions.length > 0) {
@@ -382,9 +433,151 @@ function buildProjectsListBlocks(projects = []) {
   return blocks;
 }
 
+/**
+ * Format the Add Comment Modal view for Slack
+ * @param {string} issueKey - Jira issue key (e.g. PROJ-123)
+ * @returns {Object} Slack View object
+ */
+function buildCommentModal(issueKey) {
+  return {
+    type: 'modal',
+    callback_id: 'comment_modal_submission',
+    private_metadata: issueKey, // Pass the issue key covertly so we know which issue to comment on upon submission
+    title: {
+      type: 'plain_text',
+      text: `Add Comment`,
+      emoji: true
+    },
+    submit: {
+      type: 'plain_text',
+      text: 'Post Comment',
+      emoji: true
+    },
+    close: {
+      type: 'plain_text',
+      text: 'Cancel',
+      emoji: true
+    },
+    blocks: [
+      {
+        type: 'input',
+        block_id: 'comment_block',
+        element: {
+          type: 'plain_text_input',
+          action_id: 'comment_input',
+          multiline: true,
+          placeholder: {
+            type: 'plain_text',
+            text: 'Type your comment here...'
+          }
+        },
+        label: {
+          type: 'plain_text',
+          text: `Comment on ${issueKey}`,
+          emoji: true
+        }
+      }
+    ]
+  };
+}
+
+/**
+ * Format the user's active tasks into a Slack Block Kit message array
+ * @param {Object} issuesData - Data response from Jira /search API
+ * @param {string} displayName - Name of the user
+ * @returns {Array} Slack Block Kit blocks array
+ */
+function buildUserIssuesBlocks(issuesData, displayName) {
+  const issues = issuesData.issues || [];
+  
+  if (issues.length === 0) {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `🎯 *${displayName}'s Active Tasks*\nWoohoo! No open issues found.`
+        }
+      }
+    ];
+  }
+
+  const rawDomain = process.env.JIRA_DOMAIN || 'your-domain.atlassian.net';
+  const JIRA_DOMAIN = rawDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+  const blocks = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `🎯 Active Tasks: ${displayName} (${issues.length})`,
+        emoji: true
+      }
+    },
+    {
+      type: 'divider'
+    }
+  ];
+
+  const truncate = (str, n) => (str.length > n) ? str.slice(0, n - 1) + '…' : str;
+
+  let currentFields = [
+    { type: 'mrkdwn', text: '*Key & Summary*' },
+    { type: 'mrkdwn', text: '*Status*' }
+  ];
+
+  issues.forEach((issue, index) => {
+    const key = issue.key;
+    const summary = truncate(issue.fields?.summary || 'No Summary', 60);
+    const status = issue.fields?.status?.name || 'Unknown';
+    const issueLink = `https://${JIRA_DOMAIN}/browse/${key}`;
+
+    let emoji = '🔹';
+    if (status.toLowerCase().includes('progress') || status.toLowerCase().includes('review')) emoji = '⏳';
+    else if (status.toLowerCase().includes('to do') || status.toLowerCase().includes('open')) emoji = '📝';
+    else if (status.toLowerCase().includes('done') || status.toLowerCase().includes('close')) emoji = '✅';
+
+    currentFields.push({
+      type: 'mrkdwn',
+      text: `<${issueLink}|*${key}*> - ${summary}`
+    });
+    currentFields.push({
+      type: 'mrkdwn',
+      text: `${emoji} ${status}`
+    });
+
+    // Slack allows a maximum of 10 fields per section block. 
+    // We flush the buffer to a new section when it fills up or at the end.
+    if (currentFields.length >= 10 || index === issues.length - 1) {
+      blocks.push({
+        type: 'section',
+        fields: currentFields
+      });
+      currentFields = [];
+    }
+  });
+
+  blocks.push({
+    type: 'divider'
+  });
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `Showing up to 100 active tasks. Search full queries on Jira.`
+      }
+    ]
+  });
+
+  return blocks;
+}
+
 module.exports = {
   buildIssueMessageBlocks,
   buildProjectStatsBlocks,
   buildAssigneeStatsBlocks,
-  buildProjectsListBlocks
+  buildProjectsListBlocks,
+  buildCommentModal,
+  buildUserIssuesBlocks
 };

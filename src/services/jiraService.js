@@ -98,17 +98,17 @@ async function getProjects() {
 }
 
 /**
- * Fetch a User's Account ID by their email
- * @param {string} email - The email address to search for
+ * Fetch a User's Account ID by their email or name
+ * @param {string} searchQuery - The email or name to search for
  */
-async function getUserByEmail(email) {
+async function searchUser(searchQuery) {
   try {
     const response = await jiraClient.get('/user/search', {
-      params: { query: email, maxResults: 1 }
+      params: { query: searchQuery, maxResults: 1 }
     });
     return response.data;
   } catch (error) {
-    console.error(`Error fetching Jira user by email ${email}:`, error.message);
+    console.error(`Error searching Jira user by "${searchQuery}":`, error.message);
     throw error;
   }
 }
@@ -120,13 +120,45 @@ async function getUserByEmail(email) {
  * @param {string} [mentionAccountId] - Optional Jira Account ID to mention at the end
  */
 async function addComment(issueKey, text, mentionAccountId = null) {
-  const paragraphContent = [{ type: 'text', text: text }];
+  const paragraphContent = [];
 
+  let fullText = text;
   if (mentionAccountId) {
+    if (!fullText.endsWith(' ')) fullText += ' ';
+    fullText += `[~accountid:${mentionAccountId}]`;
+  }
+
+  // Regex to extract [~accountid:ACCOUNT_ID] syntax into ADF Mention nodes
+  const mentionRegex = /\[~accountid:([^\]]+)\]/g;
+  let lastIndex = 0;
+  let match;
+
+  while ((match = mentionRegex.exec(fullText)) !== null) {
+    if (match.index > lastIndex) {
+      paragraphContent.push({
+        type: 'text',
+        text: fullText.substring(lastIndex, match.index)
+      });
+    }
+
     paragraphContent.push({
       type: 'mention',
-      attrs: { id: mentionAccountId }
+      attrs: { id: match[1] }
     });
+
+    lastIndex = mentionRegex.lastIndex;
+  }
+
+  if (lastIndex < fullText.length) {
+    paragraphContent.push({
+      type: 'text',
+      text: fullText.substring(lastIndex)
+    });
+  }
+
+  // Jira ADF doesn't allow empty paragraph content
+  if (paragraphContent.length === 0) {
+    paragraphContent.push({ type: 'text', text: ' ' });
   }
 
   try {
@@ -149,12 +181,67 @@ async function addComment(issueKey, text, mentionAccountId = null) {
   }
 }
 
+/**
+ * Fetch assignable users for a project
+ * @param {string} projectKey 
+ */
+async function getProjectUsers(projectKey) {
+  try {
+    const response = await jiraClient.get('/user/assignable/search', {
+      params: { project: projectKey }
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching assignable users for project ${projectKey}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Assign an issue to a user
+ * @param {string} issueKey 
+ * @param {string} accountId - The Jira Account ID to assign to (or null to unassign)
+ */
+async function assignIssue(issueKey, accountId) {
+  try {
+    const response = await jiraClient.put(`/issue/${issueKey}/assignee`, {
+      accountId: accountId
+    });
+    return response.status === 204;
+  } catch (error) {
+    console.error(`Error assigning issue ${issueKey} to ${accountId}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Fetch issues assigned to a specific user
+ * @param {string} accountId 
+ */
+async function getUserIssues(accountId) {
+  try {
+    const jql = `assignee="${accountId}" AND resolution = Unresolved ORDER BY updated DESC`;
+    const response = await jiraClient.post('/search/jql', {
+      jql,
+      maxResults: 100,
+      fields: ['summary', 'status', 'project', 'issuetype']
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching issues for user ${accountId}:`, error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   getIssue,
   getTransitions,
   transitionIssue,
   getProjectMetrics,
   getProjects,
-  getUserByEmail,
-  addComment
+  searchUser,
+  addComment,
+  getProjectUsers,
+  assignIssue,
+  getUserIssues
 };

@@ -16,3 +16,4 @@ coverage/
 *.backup
 *.zip
 database.sqlite
+google-credentials.json

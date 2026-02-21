@@ -24,6 +24,7 @@ app.command('/jira-report', jiraController.handleJiraReportCommand);
 app.command('/jira-team', jiraController.handleJiraTeamCommand);
 app.command('/jira-projects', jiraController.handleJiraProjectsCommand);
 app.command('/jira-map', jiraController.handleJiraMapCommand);
+app.command('/jira-tasks', jiraController.handleJiraTasksCommand);
 
 // Register button click listener pattern (matches action_id starting with 'transition_')
 app.action(/^transition_/, jiraController.handleTransitionAction);
@@ -32,6 +33,11 @@ app.action(/^transition_/, jiraController.handleTransitionAction);
 app.action('view_jira_issue', async ({ ack }) => {
   await ack();
 });
+
+// Advanced Interactivity Actions
+app.action('open_comment_modal', jiraController.handleOpenCommentModal);
+app.action('assign_issue', jiraController.handleAssignIssueAction);
+app.view('comment_modal_submission', jiraController.handleCommentSubmit);
 
 (async () => {
   // Start your app

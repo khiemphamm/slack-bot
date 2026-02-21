@@ -30,9 +30,20 @@ async function handleJiraCommand({ command, ack, respond }) {
     // Fetch from Jira
     const issueData = await jiraService.getIssue(issueKey);
     const transitionsData = await jiraService.getTransitions(issueKey);
+    
+    // Extract project key to fetch assignable users (Issue Keys are usually PROJ-123)
+    const projectKeyMatch = issueKey.match(/^([A-Z0-9]+)-\d+$/i);
+    let assignableUsers = [];
+    if (projectKeyMatch) {
+      try {
+        assignableUsers = await jiraService.getProjectUsers(projectKeyMatch[1]);
+      } catch (err) {
+        console.warn('Could not fetch assignable users. Dropdown will be hidden.', err.message);
+      }
+    }
 
     // Build the fancy Slack UI
-    const blocks = slackBlocks.buildIssueMessageBlocks(issueData, issueKey, transitionsData?.transitions);
+    const blocks = slackBlocks.buildIssueMessageBlocks(issueData, issueKey, transitionsData?.transitions, assignableUsers);
 
     // Send the actual result
     await respond({
@@ -93,15 +104,12 @@ async function handleTransitionAction({ action, ack, respond, body }) {
 
       if (slackId) {
         const userMap = await db.getUserMapping(slackId);
+        let actorText = `user (Slack ID: ${slackId}). Use \`/jira-map\` to link your account.`;
         if (userMap && userMap.jira_account_id) {
-          // Pass the account ID separately so Jira Service can construct the ADF mention node
-          const textPrefix = `🔄 Status updated to "${transitionName}" from Slack by `;
-          await jiraService.addComment(issueKey, textPrefix, userMap.jira_account_id);
-        } else {
-          // Fallback: If no map, just document that Slack changed it
-          const fallbackBody = `🔄 Status updated to "${transitionName}" from Slack by user (Slack ID: ${slackId}). Use \`/jira-map\` to link your account.`;
-          await jiraService.addComment(issueKey, fallbackBody);
+          actorText = `[~accountid:${userMap.jira_account_id}]`;
         }
+        const auditComment = `🔄 Status updated to "${transitionName}" from Slack by ${actorText}`;
+        await jiraService.addComment(issueKey, auditComment);
       }
     } catch (dbErr) {
       console.error('Error logging transition identity:', dbErr);
@@ -110,7 +118,18 @@ async function handleTransitionAction({ action, ack, respond, body }) {
     // Fetch updated data
     const issueData = await jiraService.getIssue(issueKey);
     const transitionsData = await jiraService.getTransitions(issueKey);
-    const blocks = slackBlocks.buildIssueMessageBlocks(issueData, issueKey, transitionsData?.transitions);
+    
+    const projectKeyMatch = issueKey.match(/^([A-Z0-9]+)-\d+$/i);
+    let assignableUsers = [];
+    if (projectKeyMatch) {
+      try {
+        assignableUsers = await jiraService.getProjectUsers(projectKeyMatch[1]);
+      } catch (err) {
+        console.warn('Could not fetch assignable users.', err);
+      }
+    }
+
+    const blocks = slackBlocks.buildIssueMessageBlocks(issueData, issueKey, transitionsData?.transitions, assignableUsers);
 
     // Update the message so it has the new status
     await respond({
@@ -123,6 +142,142 @@ async function handleTransitionAction({ action, ack, respond, body }) {
     console.error('Error handling transition action:', error);
     await respond({
         text: `❌ Failed to update issue.`,
+        ephemeral: true
+    });
+  }
+}
+
+/**
+ * Handle opening the Add Comment modal
+ */
+async function handleOpenCommentModal({ body, ack, client }) {
+  await ack();
+  
+  // Extract issueKey from the button value
+  const issueKey = body.actions[0].value;
+  
+  try {
+    // Generate the view for the given issue
+    const modalView = slackBlocks.buildCommentModal(issueKey);
+
+    // Call views.open with the built view
+    await client.views.open({
+      trigger_id: body.trigger_id,
+      view: modalView
+    });
+  } catch (error) {
+    console.error('Error opening comment modal:', error);
+  }
+}
+
+/**
+ * Handle form submission of the Add Comment modal
+ */
+async function handleCommentSubmit({ ack, body, view, client }) {
+  await ack();
+
+  const issueKey = view.private_metadata;
+  // Deep extract the comment text from the input block
+  const commentText = view.state.values.comment_block.comment_input.value;
+  const slackId = body.user.id;
+
+  try {
+    let accountId = null;
+    const userMap = await db.getUserMapping(slackId);
+    if (userMap && userMap.jira_account_id) {
+      accountId = userMap.jira_account_id;
+    }
+
+    let prefix = '';
+    if (accountId) {
+      prefix = `💬 Comment from Slack by [~accountid:${accountId}]:\n`;
+    } else {
+      prefix = `💬 Comment from Slack User (ID: ${slackId}):\n`;
+    }
+
+    const finalComment = `${prefix}${commentText}`;
+    await jiraService.addComment(issueKey, finalComment);
+
+    // Optionally notify the user it was successful
+    await client.chat.postMessage({
+      channel: slackId, // DM the user
+      text: `✅ Successfully added your comment to ${issueKey}.`
+    });
+
+  } catch (error) {
+    console.error('Error submitting comment:', error);
+  }
+}
+
+/**
+ * Handle re-assigning an issue via the Slack Select Menu
+ */
+async function handleAssignIssueAction({ action, ack, respond, body }) {
+  await ack();
+
+  try {
+    if (!action.selected_option || !action.selected_option.value) return;
+
+    const payload = JSON.parse(action.selected_option.value);
+    const { issueKey, accountId } = payload;
+    const slackId = body.user.id; // Record who made the change
+
+    // Show loading state
+    await respond({
+      replace_original: true,
+      text: `Assigning issue... ⏳`,
+      blocks: [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: `⏳ *Updating assignee for ${issueKey}...*`
+          }
+        }
+      ]
+    });
+
+    // 1. Assign the issue
+    await jiraService.assignIssue(issueKey, accountId);
+
+    // 2. Add an audit log comment verifying who did it
+    const userMap = await db.getUserMapping(slackId);
+    const targetText = accountId ? `[~accountid:${accountId}]` : "Unassigned";
+    let actorText = `user (Slack ID: ${slackId})`;
+
+    if (userMap && userMap.jira_account_id) {
+      actorText = `[~accountid:${userMap.jira_account_id}]`;
+    }
+
+    const auditComment = `🔄 Assignee updated to ${targetText} from Slack by ${actorText}`;
+    await jiraService.addComment(issueKey, auditComment);
+
+    // 3. Fetch latest data to re-render the card
+    const issueData = await jiraService.getIssue(issueKey);
+    const transitionsData = await jiraService.getTransitions(issueKey);
+    
+    const projectKeyMatch = issueKey.match(/^([A-Z0-9]+)-\d+$/i);
+    let assignableUsers = [];
+    if (projectKeyMatch) {
+      try {
+        assignableUsers = await jiraService.getProjectUsers(projectKeyMatch[1]);
+      } catch (err) {
+        console.warn('Could not fetch assignable users.', err);
+      }
+    }
+
+    const blocks = slackBlocks.buildIssueMessageBlocks(issueData, issueKey, transitionsData?.transitions, assignableUsers);
+
+    await respond({
+      replace_original: true,
+      blocks: blocks,
+      text: `Updated Assignee on ${issueKey}`
+    });
+
+  } catch (error) {
+    console.error('Error re-assigning issue:', error);
+    await respond({
+        text: `❌ Failed to re-assign issue.`,
         ephemeral: true
     });
   }
@@ -257,7 +412,7 @@ async function handleJiraMapCommand({ command, ack, respond, body }) {
   }
 
   try {
-    const users = await jiraService.getUserByEmail(email);
+    const users = await jiraService.searchUser(email);
     
     if (users && users.length > 0) {
       const jiraUser = users[0];
@@ -286,11 +441,76 @@ async function handleJiraMapCommand({ command, ack, respond, body }) {
   }
 }
 
+/**
+ * Handle the /jira-tasks slash command
+ */
+async function handleJiraTasksCommand({ command, ack, respond, body }) {
+  await ack();
+
+  const slackId = body.user_id;
+  const targetUser = command.text.trim();
+
+  try {
+    let accountId = null;
+    let displayName = 'You';
+
+    if (targetUser) {
+      const users = await jiraService.searchUser(targetUser);
+      if (users && users.length > 0) {
+        accountId = users[0].accountId;
+        displayName = users[0].displayName;
+      } else {
+        await respond({
+          response_type: 'ephemeral',
+          text: `❌ Could not find a Jira account matching: \`${targetUser}\`.`
+        });
+        return;
+      }
+    } else {
+      const userMap = await db.getUserMapping(slackId);
+      if (userMap && userMap.jira_account_id) {
+        accountId = userMap.jira_account_id;
+      } else {
+        await respond({
+          response_type: 'ephemeral',
+          text: `⚠️ You haven't linked your Slack account to Jira yet.\nUse \`/jira-map firstname.lastname@company.com\` to link it.\nOr search by someone's name/email directly: \`/jira-tasks John Doe\`.`
+        });
+        return;
+      }
+    }
+
+    await respond({
+      response_type: 'ephemeral',
+      text: `Fetching active tasks for ${displayName}... 🎯⏳`
+    });
+
+    const issuesData = await jiraService.getUserIssues(accountId);
+    const blocks = slackBlocks.buildUserIssuesBlocks(issuesData, displayName);
+
+    await respond({
+      response_type: 'ephemeral', // Personal to the user executing the command
+      blocks: blocks,
+      text: `Active Tasks for ${displayName}`
+    });
+
+  } catch (error) {
+    console.error('Error handling jira tasks command:', error);
+    await respond({
+      response_type: 'ephemeral',
+      text: `❌ Error fetching tasks from Jira.`
+    });
+  }
+}
+
 module.exports = {
   handleJiraCommand,
   handleTransitionAction,
   handleJiraReportCommand,
   handleJiraTeamCommand,
   handleJiraProjectsCommand,
-  handleJiraMapCommand
+  handleJiraMapCommand,
+  handleOpenCommentModal,
+  handleCommentSubmit,
+  handleAssignIssueAction,
+  handleJiraTasksCommand
 };
