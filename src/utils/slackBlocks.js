@@ -575,11 +575,112 @@ function buildUserIssuesBlocks(issuesData, displayName) {
   return blocks;
 }
 
+/**
+ * Build block for Google OAuth Login Prompt
+ * @param {string} authUrl 
+ * @returns {Array} Slack blocks array
+ */
+function buildLoginPromptBlocks(authUrl) {
+  return [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: '🔒 *Google Account Connection Required*\nTo search for company documents on Google Drive, you must link your Slack account to Google.'
+      }
+    },
+    {
+      type: 'actions',
+      elements: [
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: 'Connect Google Account',
+            emoji: true
+          },
+          url: authUrl,
+          style: 'primary',
+          action_id: 'connect_google_account_btn'
+        }
+      ]
+    }
+  ];
+}
+
+/**
+ * Build blocks for Google Drive search results
+ * @param {Array} files Array of drive file objects
+ * @param {string} query Search query string
+ * @returns {Array} Slack blocks array
+ */
+function buildDriveSearchResultsBlocks(files, query) {
+  if (!files || files.length === 0) {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `📁 No Google Drive documents found matching \`"${query}"\`.`
+        }
+      }
+    ];
+  }
+
+  const blocks = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `📁 Top Google Drive Results for "${query}"`,
+        emoji: true
+      }
+    },
+    {
+      type: 'divider'
+    }
+  ];
+
+  files.forEach(file => {
+    // Determine modified date
+    let modifiedText = 'Unknown date';
+    if (file.modifiedTime) {
+      modifiedText = new Date(file.modifiedTime).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric'
+      });
+    }
+
+    const ownerName = file.owners && file.owners.length > 0 ? file.owners[0].displayName : 'Unknown';
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*<${file.webViewLink}|${file.name}>*\n_Modified ${modifiedText} by ${ownerName}_`
+      },
+      accessory: {
+        type: 'button',
+        text: {
+          type: 'plain_text',
+          text: 'Open',
+          emoji: true
+        },
+        url: file.webViewLink,
+        action_id: `open_drive_file_${file.id}`
+      }
+    });
+  });
+
+  return blocks;
+}
+
 module.exports = {
   buildIssueMessageBlocks,
   buildProjectStatsBlocks,
   buildAssigneeStatsBlocks,
   buildProjectsListBlocks,
   buildCommentModal,
-  buildUserIssuesBlocks
+  buildUserIssuesBlocks,
+  buildLoginPromptBlocks,
+  buildDriveSearchResultsBlocks
 };

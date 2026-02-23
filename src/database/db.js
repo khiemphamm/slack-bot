@@ -32,6 +32,18 @@ const db = new sqlite3.Database(dbPath, (err) => {
         console.log('User roles table ready');
       }
     });
+
+    // Create google auth tokens table if it doesn't exist
+    db.run(`CREATE TABLE IF NOT EXISTS google_auth_tokens (
+      slack_id TEXT PRIMARY KEY,
+      refresh_token TEXT NOT NULL
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating google_auth_tokens table', err.message);
+      } else {
+        console.log('Google auth tokens table ready');
+      }
+    });
   }
 });
 
@@ -115,11 +127,45 @@ function getUserRole(slackId) {
   });
 }
 
+/**
+ * Save Google refresh token
+ */
+function saveGoogleRefreshToken(slackId, refreshToken) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT OR REPLACE INTO google_auth_tokens (slack_id, refresh_token) VALUES (?, ?)`,
+      [slackId, refreshToken],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Get Google refresh token
+ */
+function getGoogleRefreshToken(slackId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT refresh_token FROM google_auth_tokens WHERE slack_id = ?`,
+      [slackId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row ? row.refresh_token : null);
+      }
+    );
+  });
+}
+
 module.exports = {
   db,
   saveUserMapping,
   getUserMapping,
   deleteUserMapping,
   setUserRole,
-  getUserRole
+  getUserRole,
+  saveGoogleRefreshToken,
+  getGoogleRefreshToken
 };
