@@ -567,7 +567,7 @@ function buildUserIssuesBlocks(issuesData, displayName) {
     elements: [
       {
         type: 'mrkdwn',
-        text: `Showing up to 100 active tasks. Search full queries on Jira.`
+        text: `Showing up to ${issues.length} active tasks. Search full queries on Jira.`
       }
     ]
   });
