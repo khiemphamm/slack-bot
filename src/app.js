@@ -44,6 +44,9 @@ app.action('open_comment_modal', jiraController.handleOpenCommentModal);
 app.action('assign_issue', jiraController.handleAssignIssueAction);
 app.view('comment_modal_submission', jiraController.handleCommentSubmit);
 
+// Global Message Listener for Jira Links (Link Unfurling Alternative)
+app.message(/atlassian\.net\/(?:browse\/|.*[?&]selectedIssue=)([A-Za-z0-9]+-\d+)/i, jiraController.handleJiraLinkRegex);
+
 (async () => {
   // Start your app
   await app.start();

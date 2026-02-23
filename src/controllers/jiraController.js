@@ -515,6 +515,56 @@ async function handleJiraTasksCommand({ command, ack, respond, body }) {
   }
 }
 
+/**
+ * Handle Jira links pasted directly into messages via regex listener
+ */
+async function handleJiraLinkRegex({ message, context, say }) {
+  // context.matches[1] contains the first capture group from our regex (the issue key)
+  const issueKey = context.matches[1].toUpperCase();
+
+  try {
+    // 1. Fetch data from Jira API
+    const issueData = await jiraService.getIssue(issueKey);
+    const transitionsData = await jiraService.getTransitions(issueKey);
+    
+    let assignableUsers = [];
+    const projectKeyMatch = issueKey.match(/^([A-Z0-9]+)-\d+$/);
+    if (projectKeyMatch) {
+      try {
+        assignableUsers = await jiraService.getProjectUsers(projectKeyMatch[1]);
+      } catch (err) {
+        console.warn(`Could not fetch assignable users for link preview.`, err.message);
+      }
+    }
+
+    // 2. Build the UI Card
+    const blocks = slackBlocks.buildIssueMessageBlocks(issueData, issueKey, transitionsData?.transitions, assignableUsers);
+
+    // 3. Prepend a success instruction to the top of the blocks
+    const finalBlocks = [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `✅ <@${message.user}> Here is the requested info for *${issueKey}*:`
+        }
+      },
+      ...blocks
+    ];
+
+    // 4. Send the final block directly to the thread
+    await say({
+      blocks: finalBlocks,
+      text: `✅ Jira Issue details ready for ${issueKey}`,
+      thread_ts: message.ts
+    });
+
+  } catch (error) {
+    console.error(`Error processing inline link ${issueKey}:`, error.message);
+    // Ignore silently on error without spamming the channel
+  }
+}
+
 module.exports = {
   handleJiraCommand,
   handleTransitionAction,
@@ -525,5 +575,6 @@ module.exports = {
   handleOpenCommentModal,
   handleCommentSubmit,
   handleAssignIssueAction,
-  handleJiraTasksCommand
+  handleJiraTasksCommand,
+  handleJiraLinkRegex
 };
