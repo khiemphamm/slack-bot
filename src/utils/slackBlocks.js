@@ -632,7 +632,7 @@ function buildDriveSearchResultsBlocks(files, query) {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `📁 Top Google Drive Results for "${query}"`,
+        text: `📁 Top ${files.length} Google Drive Results for "${query}"`,
         emoji: true
       }
     },

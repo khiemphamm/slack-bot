@@ -16,24 +16,14 @@ async function searchFiles(refreshToken, query) {
   // Escape single quotes for drive query
   const safeQuery = query.replace(/'/g, "\\'");
 
-  // Focus on Document types, Folders, and generic names matching query
-  const driveQuery = `
-    trashed = false and 
-    name contains '${safeQuery}' and 
-    (
-      mimeType = 'application/vnd.google-apps.document' or 
-      mimeType = 'application/vnd.google-apps.spreadsheet' or 
-      mimeType = 'application/vnd.google-apps.presentation' or 
-      mimeType = 'application/vnd.google-apps.folder' or 
-      mimeType = 'application/pdf'
-    )
-  `.trim();
+  // Search for all files and folders matching the query
+  const driveQuery = `trashed = false and name contains '${safeQuery}'`;
 
   const response = await drive.files.list({
     q: driveQuery,
     fields: 'nextPageToken, files(id, name, mimeType, webViewLink, iconLink, modifiedTime, owners)',
     spaces: 'drive',
-    pageSize: 10,
+    pageSize: 40,
     orderBy: 'modifiedTime desc',
     includeItemsFromAllDrives: true,
     supportsAllDrives: true,
