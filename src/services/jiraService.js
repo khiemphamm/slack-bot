@@ -126,20 +126,54 @@ async function getProjectMetrics(projectKey) {
 
     jql += ` ORDER BY updated DESC`;
 
-    // Search max 100 recent issues for stats
-    const response = await jiraClient.post('/search/jql', {
-      jql,
-      maxResults: 100,
-      fields: ['status', 'issuetype', 'project', 'assignee']
-    });
-    
-    // Attach sprintName so UI can use it
-    const enhancedData = response.data;
-    enhancedData.sprintName = activeSprint ? activeSprint.name : null;
+    let allIssues = [];
+    let nextPageToken = null;
+    let total = 0;
+    const MAX_TARGET = 200;
 
-    return enhancedData;
+    // Fetch pages using Atlassian's v3 nextPageToken standard
+    while (allIssues.length < MAX_TARGET) {
+      const payload = {
+        jql: jql,
+        maxResults: 100, // Jira caps at 100 per request internally
+        fields: ['status', 'issuetype', 'project', 'assignee']
+      };
+
+      if (nextPageToken) {
+        payload.nextPageToken = nextPageToken;
+      }
+
+      const response = await jiraClient.post('/search/jql', payload);
+      
+      const chunk = response.data.issues || [];
+      allIssues = allIssues.concat(chunk);
+      total = response.data.total || 0; // Total might occasionally be absent in modern API
+      
+      // Jira v3 pagination gives us a nextPageToken if there's more data to fetch.
+      nextPageToken = response.data.nextPageToken;
+      
+      // Stop looping if we're out of tokens, or the chunk returned empty.
+      if (!nextPageToken || chunk.length === 0) {
+        break;
+      }
+    }
+    
+    // Cap the array strictly at MAX_TARGET just in case
+    if (allIssues.length > MAX_TARGET) {
+      allIssues = allIssues.slice(0, MAX_TARGET);
+    }
+    
+    // Return identical format, mapping all collected issues
+    return {
+      issues: allIssues,
+      total: Math.max(total, allIssues.length), // Failsafe if total goes missing
+      sprintName: activeSprint ? activeSprint.name : null
+    };
   } catch (error) {
     console.error(`Error fetching metrics for project ${projectKey}:`, error.message);
+    if (error.response && error.response.data) {
+      console.error('Jira API Error Response:', JSON.stringify(error.response.data, null, 2));
+    }
     throw error;
   }
 }
@@ -281,14 +315,46 @@ async function assignIssue(issueKey, accountId) {
 async function getUserIssues(accountId) {
   try {
     const jql = `assignee="${accountId}" AND resolution = Unresolved ORDER BY updated DESC`;
-    const response = await jiraClient.post('/search/jql', {
-      jql,
-      maxResults: 100,
-      fields: ['summary', 'status', 'project', 'issuetype']
-    });
-    return response.data;
+    let allIssues = [];
+    let nextPageToken = null;
+    let total = 0;
+    const MAX_TARGET = 200;
+
+    // Fetch pages until we hit our target using v3 standard pagination
+    while (allIssues.length < MAX_TARGET) {
+      const payload = {
+        jql: jql,
+        maxResults: 100, // Jira cap
+        fields: ['summary', 'status', 'project', 'issuetype']
+      };
+
+      if (nextPageToken) {
+        payload.nextPageToken = nextPageToken;
+      }
+
+      const response = await jiraClient.post('/search/jql', payload);
+      
+      const chunk = response.data.issues || [];
+      allIssues = allIssues.concat(chunk);
+      total = response.data.total || 0;
+      
+      nextPageToken = response.data.nextPageToken;
+
+      if (!nextPageToken || chunk.length === 0) {
+        break;
+      }
+    }
+
+    if (allIssues.length > MAX_TARGET) {
+      allIssues = allIssues.slice(0, MAX_TARGET);
+    }
+
+    return { issues: allIssues, total: Math.max(total, allIssues.length) };
   } catch (error) {
     console.error(`Error fetching issues for user ${accountId}:`, error.message);
+    if (error.response && error.response.data) {
+      console.error('Jira API Error Response (User Issues):', JSON.stringify(error.response.data, null, 2));
+    }
     throw error;
   }
 }
