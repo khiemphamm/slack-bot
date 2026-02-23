@@ -32,6 +32,7 @@ app.command('/jira-tasks', jiraController.handleJiraTasksCommand); // Permission
 // Google Workspace slash command
 app.command('/doc', googleController.handleDocSearchCommand);
 app.command('/docs', googleController.handleDocSearchCommand); // Alias for plural form
+app.command('/docs-list', googleController.handleDocsListCommand);
 
 // Secure slash command listeners (Admin Only)
 app.command('/jira-report', requireAdmin, jiraController.handleJiraReportCommand);

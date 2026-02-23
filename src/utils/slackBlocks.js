@@ -674,6 +674,72 @@ function buildDriveSearchResultsBlocks(files, query) {
   return blocks;
 }
 
+/**
+ * Build blocks for recent Google Drive files
+ * @param {Array} files Array of drive file objects
+ * @param {number} limit Number of files requested
+ * @returns {Array} Slack blocks array
+ */
+function buildRecentFilesBlocks(files, limit) {
+  if (!files || files.length === 0) {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `📁 No recent Google Drive documents found.`
+        }
+      }
+    ];
+  }
+
+  const blocks = [
+    {
+      type: 'header',
+      text: {
+        type: 'plain_text',
+        text: `⏳ Top ${limit} Recent Google Drive Documents`,
+        emoji: true
+      }
+    },
+    {
+      type: 'divider'
+    }
+  ];
+
+  files.forEach(file => {
+    // Determine modified date
+    let modifiedText = 'Unknown date';
+    if (file.modifiedTime) {
+      modifiedText = new Date(file.modifiedTime).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric'
+      });
+    }
+
+    const ownerName = file.owners && file.owners.length > 0 ? file.owners[0].displayName : 'Unknown';
+
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*<${file.webViewLink}|${file.name}>*\n_Modified ${modifiedText} by ${ownerName}_`
+      },
+      accessory: {
+        type: 'button',
+        text: {
+          type: 'plain_text',
+          text: 'Open',
+          emoji: true
+        },
+        url: file.webViewLink,
+        action_id: `open_drive_file_${file.id}`
+      }
+    });
+  });
+
+  return blocks;
+}
+
 module.exports = {
   buildIssueMessageBlocks,
   buildProjectStatsBlocks,
@@ -682,5 +748,6 @@ module.exports = {
   buildCommentModal,
   buildUserIssuesBlocks,
   buildLoginPromptBlocks,
-  buildDriveSearchResultsBlocks
+  buildDriveSearchResultsBlocks,
+  buildRecentFilesBlocks
 };
