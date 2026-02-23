@@ -112,19 +112,61 @@ async function getActiveSprint(projectKey) {
 }
 
 /**
- * Fetch project metrics via JQL search, filtered by Active Sprint if applicable.
- * @param {string} projectKey - e.g. PROJ
+ * Fetch project metrics via JQL search, filtered by Active Sprint if applicable, or by free-text keyword.
+ * @param {string} queryParam - e.g. PROJ or "login issue"
  */
-async function getProjectMetrics(projectKey) {
+async function getProjectMetrics(queryParam) {
   try {
-    const activeSprint = await getActiveSprint(projectKey);
-    let jql = `project = "${projectKey}"`;
+    let jql = '';
+    let sprintName = null;
+    let matchedProjectKey = null;
+    const safeKeyword = queryParam.replace(/"/g, '\\"');
+    const lowerQuery = queryParam.trim().toLowerCase();
 
-    if (activeSprint) {
-      jql += ` AND sprint = ${activeSprint.id}`;
+    // 1. Smart Project Resolution
+    try {
+      // getProjects() is hoisted and available globally in this file
+      const projects = await getProjects();
+      
+      // Pass 1: Exact Key match (e.g. "GST")
+      let match = projects.find(p => p.key.toLowerCase() === lowerQuery);
+      
+      // Pass 2: Exact Name match (e.g. "Glozin Shopify Themeforest")
+      if (!match) {
+        match = projects.find(p => p.name.toLowerCase() === lowerQuery);
+      }
+      
+      // Pass 3: Partial Name match (e.g. "glozin" in "Glozin Shopify Themeforest")
+      // Split into keywords and find a project name that contains at least part of the query
+      if (!match) {
+        match = projects.find(p => p.name.toLowerCase().includes(lowerQuery));
+      }
+
+      if (match) {
+        matchedProjectKey = match.key;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch projects for smart resolution:', err.message);
+    }
+
+    // 2. Build JQL
+    if (matchedProjectKey) {
+      const activeSprint = await getActiveSprint(matchedProjectKey);
+      
+      if (activeSprint) {
+        sprintName = activeSprint.name;
+        jql = `project = "${matchedProjectKey}" AND sprint = ${activeSprint.id}`;
+      } else {
+        jql = `project = "${matchedProjectKey}"`;
+      }
+    } else {
+      // It has spaces/special chars or didn't match any project, definitely a keyword search
+      jql = `text ~ "${safeKeyword}"`;
     }
 
     jql += ` ORDER BY updated DESC`;
+
+    console.log(`[DEBUG] Executing JQL for queryParam "${queryParam}":`, jql);
 
     let allIssues = [];
     let nextPageToken = null;
@@ -163,14 +205,16 @@ async function getProjectMetrics(projectKey) {
       allIssues = allIssues.slice(0, MAX_TARGET);
     }
     
+    console.log(`[DEBUG] Jira API returned ${allIssues.length} issues for queryParam "${queryParam}"`);
+
     // Return identical format, mapping all collected issues
     return {
       issues: allIssues,
       total: Math.max(total, allIssues.length), // Failsafe if total goes missing
-      sprintName: activeSprint ? activeSprint.name : null
+      sprintName: sprintName
     };
   } catch (error) {
-    console.error(`Error fetching metrics for project ${projectKey}:`, error.message);
+    console.error(`Error fetching metrics for query ${queryParam}:`, error.message);
     if (error.response && error.response.data) {
       console.error('Jira API Error Response:', JSON.stringify(error.response.data, null, 2));
     }

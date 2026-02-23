@@ -290,12 +290,12 @@ async function handleAssignIssueAction({ action, ack, respond, body }) {
 async function handleJiraReportCommand({ command, ack, respond }) {
   await ack();
 
-  const projectKey = command.text.trim().toUpperCase();
+  const queryParam = command.text.trim();
 
-  if (!projectKey) {
+  if (!queryParam) {
     await respond({
       response_type: 'ephemeral',
-      text: 'Please provide a Jira Project Key. Example: `/jira-report PROJ`'
+      text: 'Please provide a Jira Project Key or Keyword. Example: `/jira-report PROJ` or `/jira-report login error`'
     });
     return;
   }
@@ -303,24 +303,24 @@ async function handleJiraReportCommand({ command, ack, respond }) {
   try {
     await respond({
       response_type: 'ephemeral',
-      text: `Calculating statistics for project ${projectKey}... 📊⏳`
+      text: `Calculating statistics for "${queryParam}"... 📊⏳`
     });
 
-    const metricsData = await jiraService.getProjectMetrics(projectKey);
+    const metricsData = await jiraService.getProjectMetrics(queryParam);
     const sprintName = metricsData.sprintName;
-    const blocks = slackBlocks.buildProjectStatsBlocks(metricsData, projectKey, sprintName);
+    const blocks = slackBlocks.buildProjectStatsBlocks(metricsData, queryParam, sprintName);
 
     await respond({
       response_type: 'in_channel',
       blocks: blocks,
-      text: `Project Statistics: ${projectKey}`
+      text: `Project Statistics: ${queryParam}`
     });
 
   } catch (error) {
     console.error('Error handling jira report command:', error);
     await respond({
       response_type: 'ephemeral',
-      text: `❌ Error calculating project statistics. Please check if the project key \`${projectKey}\` is correct.`
+      text: `❌ Error calculating project statistics. Please check if the query \`${queryParam}\` is correct.`
     });
   }
 }
@@ -331,12 +331,12 @@ async function handleJiraReportCommand({ command, ack, respond }) {
 async function handleJiraTeamCommand({ command, ack, respond }) {
   await ack();
 
-  const projectKey = command.text.trim().toUpperCase();
+  const queryParam = command.text.trim();
 
-  if (!projectKey) {
+  if (!queryParam) {
     await respond({
       response_type: 'ephemeral',
-      text: 'Please provide a Jira Project Key. Example: `/jira-team PROJ`'
+      text: 'Please provide a Jira Project Key or Keyword. Example: `/jira-team PROJ` or `/jira-team login error`'
     });
     return;
   }
@@ -344,24 +344,24 @@ async function handleJiraTeamCommand({ command, ack, respond }) {
   try {
     await respond({
       response_type: 'ephemeral',
-      text: `Fetching team workload for project ${projectKey}... 👥⏳`
+      text: `Fetching team workload for "${queryParam}"... 👥⏳`
     });
 
-    const metricsData = await jiraService.getProjectMetrics(projectKey);
+    const metricsData = await jiraService.getProjectMetrics(queryParam);
     const sprintName = metricsData.sprintName;
-    const blocks = slackBlocks.buildAssigneeStatsBlocks(metricsData, projectKey, sprintName);
+    const blocks = slackBlocks.buildAssigneeStatsBlocks(metricsData, queryParam, sprintName);
 
     await respond({
       response_type: 'in_channel',
       blocks: blocks,
-      text: `Team Workload: ${projectKey}`
+      text: `Team Workload: ${queryParam}`
     });
 
   } catch (error) {
     console.error('Error handling jira team command:', error);
     await respond({
       response_type: 'ephemeral',
-      text: `❌ Error calculating team workload. Please check if the project key \`${projectKey}\` is correct.`
+      text: `❌ Error calculating team workload. Please check if the query \`${queryParam}\` is correct.`
     });
   }
 }
