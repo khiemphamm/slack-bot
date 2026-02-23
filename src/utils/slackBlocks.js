@@ -148,9 +148,10 @@ function buildIssueMessageBlocks(issue, issueKey, transitions = [], assignableUs
  * Format project statistics into a Slack Block Kit message array
  * @param {Object} metricsData - Data response from Jira /search API
  * @param {string} projectKey - Jira project key
+ * @param {string} [sprintName] - Optional active sprint name
  * @returns {Array} Slack Block Kit blocks array
  */
-function buildProjectStatsBlocks(metricsData, projectKey) {
+function buildProjectStatsBlocks(metricsData, projectKey, sprintName = null) {
   const issues = metricsData.issues || [];
   const totalIssues = metricsData.total || issues.length;
 
@@ -238,7 +239,7 @@ function buildProjectStatsBlocks(metricsData, projectKey) {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `📊 Project: ${projectName} Overview`,
+        text: `📊 Project: ${projectName} Overview${sprintName ? ` - 🎯 ${sprintName}` : ''}`,
         emoji: true
       }
     },
@@ -278,9 +279,10 @@ function buildProjectStatsBlocks(metricsData, projectKey) {
  * Format assignee statistics into a Slack Block Kit message array
  * @param {Object} metricsData - Data response from Jira /search API
  * @param {string} projectKey - Jira project key
+ * @param {string} [sprintName] - Optional active sprint name
  * @returns {Array} Slack Block Kit blocks array
  */
-function buildAssigneeStatsBlocks(metricsData, projectKey) {
+function buildAssigneeStatsBlocks(metricsData, projectKey, sprintName = null) {
   const issues = metricsData.issues || [];
   const totalIssues = metricsData.total || issues.length;
 
@@ -330,7 +332,7 @@ function buildAssigneeStatsBlocks(metricsData, projectKey) {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `👥 Team Workload: ${projectName}`,
+        text: `👥 Team Workload: ${projectName}${sprintName ? ` - 🎯 ${sprintName}` : ''}`,
         emoji: true
       }
     },

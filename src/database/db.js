@@ -20,6 +20,18 @@ const db = new sqlite3.Database(dbPath, (err) => {
         console.log('Database and user_mapping table ready');
       }
     });
+
+    // Create user roles table for RBAC if it doesn't exist
+    db.run(`CREATE TABLE IF NOT EXISTS user_roles (
+      slack_id TEXT PRIMARY KEY,
+      role TEXT DEFAULT 'user'
+    )`, (err) => {
+      if (err) {
+        console.error('Error creating user_roles table', err.message);
+      } else {
+        console.log('User roles table ready');
+      }
+    });
   }
 });
 
@@ -71,9 +83,43 @@ function deleteUserMapping(slackId) {
   });
 }
 
+/**
+ * Upsert a user role
+ */
+function setUserRole(slackId, role) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT OR REPLACE INTO user_roles (slack_id, role) VALUES (?, ?)`,
+      [slackId, role],
+      function (err) {
+        if (err) reject(err);
+        else resolve(this.changes);
+      }
+    );
+  });
+}
+
+/**
+ * Get a user's role
+ */
+function getUserRole(slackId) {
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT role FROM user_roles WHERE slack_id = ?`,
+      [slackId],
+      (err, row) => {
+        if (err) reject(err);
+        else resolve(row ? row.role : 'user'); // Default to 'user' if not found
+      }
+    );
+  });
+}
+
 module.exports = {
   db,
   saveUserMapping,
   getUserMapping,
-  deleteUserMapping
+  deleteUserMapping,
+  setUserRole,
+  getUserRole
 };

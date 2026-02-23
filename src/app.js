@@ -1,6 +1,8 @@
 const { App } = require('@slack/bolt');
 const env = require('./config/env');
 const jiraController = require('./controllers/jiraController');
+const adminController = require('./controllers/adminController');
+const { requireAdmin } = require('./middlewares/authMiddleware');
 
 
 // Initializes your app with your bot token and signing secret
@@ -20,11 +22,14 @@ app.message('hello', async ({ message, say }) => {
 
 // Register slash command listener
 app.command('/jira', jiraController.handleJiraCommand);
-app.command('/jira-report', jiraController.handleJiraReportCommand);
-app.command('/jira-team', jiraController.handleJiraTeamCommand);
-app.command('/jira-projects', jiraController.handleJiraProjectsCommand);
 app.command('/jira-map', jiraController.handleJiraMapCommand);
-app.command('/jira-tasks', jiraController.handleJiraTasksCommand);
+app.command('/jira-tasks', jiraController.handleJiraTasksCommand); // Permissions checked inside controller
+
+// Secure slash command listeners (Admin Only)
+app.command('/jira-report', requireAdmin, jiraController.handleJiraReportCommand);
+app.command('/jira-team', requireAdmin, jiraController.handleJiraTeamCommand);
+app.command('/jira-projects', requireAdmin, jiraController.handleJiraProjectsCommand);
+app.command('/jira-grant-admin', requireAdmin, adminController.handleGrantAdminCommand);
 
 // Register button click listener pattern (matches action_id starting with 'transition_')
 app.action(/^transition_/, jiraController.handleTransitionAction);

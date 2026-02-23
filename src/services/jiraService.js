@@ -17,6 +17,17 @@ const jiraClient = axios.create({
 });
 
 /**
+ * create generic Jira Agile Axios client (for boards and sprints)
+ */
+const jiraAgileClient = axios.create({
+  baseURL: `https://${JIRA_DOMAIN}/rest/agile/1.0`,
+  headers: {
+    'Authorization': `Basic ${Buffer.from(`${JIRA_EMAIL}:${JIRA_API_TOKEN}`).toString('base64')}`,
+    'Accept': 'application/json'
+  }
+});
+
+/**
  * Fetch issue details by Issue Key or ID
  * @param {string} issueIdOrKey - e.g. PROJ-123
  */
@@ -64,20 +75,69 @@ async function transitionIssue(issueIdOrKey, transitionId) {
 }
 
 /**
- * Fetch project metrics via JQL search
+ * Fetch the active sprint for a given project.
+ * @param {string} projectKey 
+ * @returns {Object|null} { id: number, name: string } or null if none/Kanban.
+ */
+async function getActiveSprint(projectKey) {
+  try {
+    // 1. Get the Board for this project
+    const boardRes = await jiraAgileClient.get('/board', {
+      params: { projectKeyOrId: projectKey }
+    });
+    
+    if (!boardRes.data.values || boardRes.data.values.length === 0) {
+      return null; // Probably not an agile project
+    }
+
+    const boardId = boardRes.data.values[0].id;
+
+    // 2. Get the active sprint for this board
+    const sprintRes = await jiraAgileClient.get(`/board/${boardId}/sprint`, {
+      params: { state: 'active' }
+    });
+
+    if (sprintRes.data.values && sprintRes.data.values.length > 0) {
+      const activeSprint = sprintRes.data.values[0];
+      return {
+        id: activeSprint.id,
+        name: activeSprint.name
+      };
+    }
+  } catch (error) {
+    // 400 or 404 generally means the board does not support sprints (e.g., Kanban)
+    console.warn(`Could not fetch active sprint for ${projectKey} (Might be Kanban): ${error.message}`);
+  }
+  return null;
+}
+
+/**
+ * Fetch project metrics via JQL search, filtered by Active Sprint if applicable.
  * @param {string} projectKey - e.g. PROJ
  */
 async function getProjectMetrics(projectKey) {
   try {
-    // Search max 100 recent issues for simple stats using the new /search/jql endpoint
-    const jql = `project = "${projectKey}" ORDER BY updated DESC`;
+    const activeSprint = await getActiveSprint(projectKey);
+    let jql = `project = "${projectKey}"`;
+
+    if (activeSprint) {
+      jql += ` AND sprint = ${activeSprint.id}`;
+    }
+
+    jql += ` ORDER BY updated DESC`;
+
+    // Search max 100 recent issues for stats
     const response = await jiraClient.post('/search/jql', {
       jql,
       maxResults: 100,
       fields: ['status', 'issuetype', 'project', 'assignee']
     });
     
-    return response.data;
+    // Attach sprintName so UI can use it
+    const enhancedData = response.data;
+    enhancedData.sprintName = activeSprint ? activeSprint.name : null;
+
+    return enhancedData;
   } catch (error) {
     console.error(`Error fetching metrics for project ${projectKey}:`, error.message);
     throw error;
@@ -243,5 +303,6 @@ module.exports = {
   addComment,
   getProjectUsers,
   assignIssue,
-  getUserIssues
+  getUserIssues,
+  getActiveSprint
 };

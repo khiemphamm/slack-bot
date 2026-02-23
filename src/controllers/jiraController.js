@@ -1,6 +1,7 @@
 const jiraService = require('../services/jiraService');
 const slackBlocks = require('../utils/slackBlocks');
 const db = require('../database/db');
+const { checkIsAdmin } = require('../middlewares/authMiddleware');
 
 /**
  * Handle the /jira slash command
@@ -306,7 +307,8 @@ async function handleJiraReportCommand({ command, ack, respond }) {
     });
 
     const metricsData = await jiraService.getProjectMetrics(projectKey);
-    const blocks = slackBlocks.buildProjectStatsBlocks(metricsData, projectKey);
+    const sprintName = metricsData.sprintName;
+    const blocks = slackBlocks.buildProjectStatsBlocks(metricsData, projectKey, sprintName);
 
     await respond({
       response_type: 'in_channel',
@@ -346,7 +348,8 @@ async function handleJiraTeamCommand({ command, ack, respond }) {
     });
 
     const metricsData = await jiraService.getProjectMetrics(projectKey);
-    const blocks = slackBlocks.buildAssigneeStatsBlocks(metricsData, projectKey);
+    const sprintName = metricsData.sprintName;
+    const blocks = slackBlocks.buildAssigneeStatsBlocks(metricsData, projectKey, sprintName);
 
     await respond({
       response_type: 'in_channel',
@@ -455,6 +458,16 @@ async function handleJiraTasksCommand({ command, ack, respond, body }) {
     let displayName = 'You';
 
     if (targetUser) {
+      // 🚨 Permission Check: Only Admins can view other users' tasks
+      const isAdmin = await checkIsAdmin(slackId);
+      if (!isAdmin) {
+        await respond({
+          text: `🚫 *Access Denied*\nYou do not have permission to view other users' tasks. Ask an Administrator to grant you access using \`/jira-grant-admin <@your_name>\`.`,
+          response_type: 'ephemeral'
+        });
+        return;
+      }
+
       const users = await jiraService.searchUser(targetUser);
       if (users && users.length > 0) {
         accountId = users[0].accountId;
