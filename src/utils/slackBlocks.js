@@ -420,17 +420,36 @@ function buildProjectsListBlocks(projects = []) {
     }
   ];
 
-  // List each project as a section
-  projects.forEach(p => {
-    let typeEmoji = p.projectTypeKey === 'software' ? '💻' : (p.projectTypeKey === 'business' ? '💼' : '📁');
+  const rawDomain = process.env.JIRA_DOMAIN || 'your-domain.atlassian.net';
+  const JIRA_DOMAIN = rawDomain.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const baseUrl = `https://${JIRA_DOMAIN}`;
+
+  // Group projects into chunks of 5 (Slack allows max 10 fields per section block)
+  for (let i = 0; i < projects.length; i += 5) {
+    const chunk = projects.slice(i, i + 5);
+    const fields = [];
+
+    chunk.forEach(p => {
+      let typeEmoji = p.projectTypeKey === 'software' ? '💻' : (p.projectTypeKey === 'business' ? '💼' : '📁');
+      fields.push({
+        type: 'mrkdwn',
+        text: `*<${baseUrl}/browse/${p.key}|${p.name}>*`
+      });
+      fields.push({
+        type: 'mrkdwn',
+        text: `🏷️ \`${p.key}\`  ${typeEmoji} \`${p.projectTypeKey}\``
+      });
+    });
+
     blocks.push({
       type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `${typeEmoji} *${p.name}*\n🏷️ \`Key: ${p.key}\` | 🗂️ \`Type: ${p.projectTypeKey}\``
-      }
+      fields: fields
     });
-  });
+    
+    if (i + 5 < projects.length) {
+      blocks.push({ type: 'divider' });
+    }
+  }
 
   return blocks;
 }
